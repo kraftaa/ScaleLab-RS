@@ -1,0 +1,37 @@
+name = "corpus-reuse-20x"
+output_dir = "../runs/mvp"
+tokenizer_corpus = "../data/mvp/tokenizer-source.txt"
+validation_corpus = "../data/mvp/validation.txt"
+prompts = ["it is a truth", "alice was beginning", "the question was"]
+
+[model]
+context_length = 96
+d_model = 32
+n_heads = 4
+n_layers = 2
+d_ff = 96
+expected_parameters = 27520
+
+[training]
+batch_size = 8
+eval_interval = 100
+eval_batches = 20
+learning_rate = 0.0003
+weight_decay = 0.01
+seeds = [11, 42, 73]
+sample_tokens = 160
+
+[[runs]]
+name = "small-1x"
+train_corpus = "../data/mvp/train-small.txt"
+target_tokens_per_parameter = 1
+
+[[runs]]
+name = "repeated-20x"
+train_corpus = "../data/mvp/train-small.txt"
+target_tokens_per_parameter = 20
+
+[[runs]]
+name = "broad-20x"
+train_corpus = "../data/mvp/train-broad.txt"
+target_tokens_per_parameter = 20

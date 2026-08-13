@@ -1,0 +1,21 @@
+output_dir = "runs/smoke"
+
+[data]
+path = "fixtures/smoke.txt"
+train_fraction = 0.8
+
+[model]
+context_length = 16
+d_model = 32
+n_heads = 4
+n_layers = 2
+d_ff = 128
+
+[training]
+batch_size = 4
+steps = 20
+eval_interval = 5
+eval_batches = 2
+learning_rate = 0.001
+weight_decay = 0.01
+seed = 42

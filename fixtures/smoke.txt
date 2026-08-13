@@ -1,0 +1,10 @@
+attention lets each token look backward. the mask keeps every future token hidden.
+attention lets each token look backward. the mask keeps every future token hidden.
+attention lets each token look backward. the mask keeps every future token hidden.
+attention lets each token look backward. the mask keeps every future token hidden.
+attention lets each token look backward. the mask keeps every future token hidden.
+attention lets each token look backward. the mask keeps every future token hidden.
+attention lets each token look backward. the mask keeps every future token hidden.
+attention lets each token look backward. the mask keeps every future token hidden.
+attention lets each token look backward. the mask keeps every future token hidden.
+attention lets each token look backward. the mask keeps every future token hidden.

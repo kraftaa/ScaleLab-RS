@@ -1,0 +1,40 @@
+# Copy this file to experiments/mvp.toml after preparing document-separated
+# corpora under data/. Relative paths are resolved from this file's directory.
+name = "corpus-reuse-20x"
+output_dir = "../runs/corpus-reuse-20x"
+tokenizer_corpus = "../data/train-broad.txt"
+validation_corpus = "../data/validation.txt"
+prompts = ["the model", "once upon a time", "learning means"]
+
+[model]
+context_length = 64
+d_model = 32
+n_heads = 4
+n_layers = 2
+d_ff = 128
+# Run `check` once to discover the count, then pin it here.
+# expected_parameters = <value printed by check>
+
+[training]
+batch_size = 8
+eval_interval = 250
+eval_batches = 20
+learning_rate = 0.0003
+weight_decay = 0.01
+seeds = [11, 42, 73]
+sample_tokens = 200
+
+[[runs]]
+name = "small-1x"
+train_corpus = "../data/train-small.txt"
+target_tokens_per_parameter = 1
+
+[[runs]]
+name = "reused-20x"
+train_corpus = "../data/train-small.txt"
+target_tokens_per_parameter = 20
+
+[[runs]]
+name = "broad-20x"
+train_corpus = "../data/train-broad.txt"
+target_tokens_per_parameter = 20

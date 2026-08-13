@@ -1,0 +1,2 @@
+careful evaluation asks whether a learned pattern works on held-out text.
+good measurements separate optimization progress from corpus memorization.

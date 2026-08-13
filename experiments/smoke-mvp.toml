@@ -1,0 +1,37 @@
+name = "smoke-data-reuse"
+output_dir = "../runs/smoke-mvp-seeded"
+tokenizer_corpus = "../fixtures/scalelab/tokenizer-source.txt"
+validation_corpus = "../fixtures/scalelab/validation.txt"
+prompts = ["the model", "attention"]
+
+[model]
+context_length = 8
+d_model = 16
+n_heads = 4
+n_layers = 1
+d_ff = 32
+expected_parameters = 3536
+
+[training]
+batch_size = 4
+eval_interval = 10
+eval_batches = 2
+learning_rate = 0.001
+weight_decay = 0.01
+seeds = [11, 42, 73]
+sample_tokens = 12
+
+[[runs]]
+name = "small-low"
+train_corpus = "../fixtures/scalelab/train-small.txt"
+target_tokens_per_parameter = 0.10
+
+[[runs]]
+name = "reused-equal-compute"
+train_corpus = "../fixtures/scalelab/train-small.txt"
+target_tokens_per_parameter = 0.50
+
+[[runs]]
+name = "broad-equal-compute"
+train_corpus = "../fixtures/scalelab/train-broad.txt"
+target_tokens_per_parameter = 0.50

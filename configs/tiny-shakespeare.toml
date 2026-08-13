@@ -1,0 +1,21 @@
+output_dir = "runs/tiny-shakespeare"
+
+[data]
+path = "data/tiny-shakespeare.txt"
+train_fraction = 0.9
+
+[model]
+context_length = 128
+d_model = 192
+n_heads = 6
+n_layers = 4
+d_ff = 768
+
+[training]
+batch_size = 32
+steps = 5000
+eval_interval = 250
+eval_batches = 20
+learning_rate = 0.0003
+weight_decay = 0.1
+seed = 42

@@ -1,0 +1,25 @@
+[package]
+name = "transformer-lab"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "scalelab"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1"
+# Candle 0.11 currently requires an ARM f16 intrinsic newer than Rust 1.93 on
+# Apple Silicon. Pin 0.10 so this educational project builds on stable Rust.
+candle-core = "=0.10.0"
+candle-nn = "=0.10.0"
+clap = { version = "4", features = ["derive"] }
+rand = "0.9"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+toml = "0.9"
+
+[dev-dependencies]
+approx = "0.5"
+tempfile = "3"
