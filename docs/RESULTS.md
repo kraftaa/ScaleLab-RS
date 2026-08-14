@@ -6,14 +6,16 @@ The controlled experiment supports the MVP hypothesis at this scale:
 processing the same token budget from a broader corpus generalized better than
 replaying a short corpus.
 
-| Condition | Corpus characters | Processed characters | Effective epochs | Final train NLL | Final validation NLL | Generalization gap |
-|---|---:|---:|---:|---:|---:|---:|
-| Broad 20x | 719,847 | 550,656 | 0.76 | 3.1758 | 3.1952 | 0.0193 |
-| Repeated 20x | 25,184 | 550,656 | 21.87 | 3.1698 | 3.2165 | 0.0468 |
+| Condition | Corpus characters | Processed characters | Effective epochs | Train NLL | Train PPL | Validation NLL | Validation PPL | Gap |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| Broad 20x | 719,847 | 550,656 | 0.76 | 3.1758 | 23.95 | 3.1952 | 24.41 | 0.0193 |
+| Repeated 20x | 25,184 | 550,656 | 21.87 | 3.1698 | 23.80 | 3.2165 | 24.94 | 0.0468 |
 
 The entries are means over paired seeds 11, 42, and 73. Both conditions used
 the same 27,520-parameter model and processed 20.009 character tokens per
-parameter. The broad condition's final validation NLL was lower in every seed:
+parameter. Aggregate perplexity is `exp(mean NLL)`, the geometric mean of the
+per-seed perplexities. The broad condition's final validation NLL was lower in
+every seed:
 
 | Seed | Broad validation NLL | Repeated validation NLL | Repeated minus broad |
 |---:|---:|---:|---:|

@@ -138,12 +138,12 @@ fn read_metrics(path: &Path) -> Result<Vec<ExperimentMetric>> {
 
 fn comparison_csv(runs: &[RunReport]) -> String {
     let mut csv = String::from(
-        "run,seed,parameters,train_corpus_tokens,processed_tokens,tokens_per_parameter,effective_epochs,best_validation_nll,final_train_nll,final_validation_nll,generalization_gap,elapsed_seconds\n",
+        "run,seed,parameters,train_corpus_tokens,processed_tokens,tokens_per_parameter,effective_epochs,best_validation_nll,final_train_nll,final_train_perplexity,final_validation_nll,final_validation_perplexity,generalization_gap,elapsed_seconds\n",
     );
     for run in runs {
         let s = &run.summary;
         csv.push_str(&format!(
-            "{},{},{},{},{},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.3}\n",
+            "{},{},{},{},{},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.3}\n",
             s.run,
             s.seed,
             s.parameter_count,
@@ -153,7 +153,9 @@ fn comparison_csv(runs: &[RunReport]) -> String {
             s.effective_epochs,
             s.best_validation_nll,
             s.final_train_nll,
+            perplexity(s.final_train_nll as f64),
             s.final_validation_nll,
+            perplexity(s.final_validation_nll as f64),
             s.final_generalization_gap,
             s.elapsed_seconds
         ));
@@ -184,7 +186,7 @@ fn html_report(runs: &[RunReport], headline_svg: &str, loss_svg: &str, gap_svg: 
                     .map(|run| run.summary.final_generalization_gap as f64),
             );
             format!(
-                "<tr><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{:.2}</td><td>{:.2}</td><td>{:.4}</td><td>{:.4} ± {:.4}</td><td>{:.4}</td></tr>",
+                "<tr><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{:.2}</td><td>{:.2}</td><td>{:.4}</td><td>{:.2}</td><td>{:.4} ± {:.4}</td><td>{:.2}</td><td>{:.4}</td></tr>",
                 escape(name),
                 replications.len(),
                 s.parameter_count,
@@ -193,8 +195,10 @@ fn html_report(runs: &[RunReport], headline_svg: &str, loss_svg: &str, gap_svg: 
                 s.tokens_per_parameter,
                 s.effective_epochs,
                 train_mean,
+                perplexity(train_mean),
                 validation_mean,
                 validation_sd,
+                perplexity(validation_mean),
                 gap_mean
             )
         })
@@ -235,20 +239,20 @@ fn html_report(runs: &[RunReport], headline_svg: &str, loss_svg: &str, gap_svg: 
 *{{box-sizing:border-box}} body{{margin:0;background:var(--wash);color:var(--ink);font:15px/1.55 ui-sans-serif,system-ui,sans-serif}}
 main{{max-width:1120px;margin:auto;padding:48px 24px}} h1{{font-size:38px;margin:0 0 4px}} h2{{margin-top:42px}} .lede{{color:var(--muted);font-size:18px;max-width:780px}}
 .card{{background:var(--paper);border:1px solid var(--line);border-radius:14px;padding:22px;margin:18px 0;box-shadow:0 4px 18px #1720330a;overflow:auto}}
-table{{border-collapse:collapse;width:100%;min-width:900px}} th,td{{padding:10px 12px;text-align:right;border-bottom:1px solid var(--line)}} th:first-child,td:first-child{{text-align:left}} th{{font-size:12px;text-transform:uppercase;color:var(--muted)}}
+table{{border-collapse:collapse;width:100%;min-width:1100px}} th,td{{padding:10px 12px;text-align:right;border-bottom:1px solid var(--line)}} th:first-child,td:first-child{{text-align:left}} th{{font-size:12px;text-transform:uppercase;color:var(--muted)}}
 .valid{{display:inline-block;color:#166534;background:#dcfce7;border-radius:999px;padding:5px 10px;font-weight:700}} code{{background:#e8eef8;padding:2px 5px;border-radius:4px}}
 pre{{white-space:pre-wrap;background:#0f172a;color:#e2e8f0;border-radius:8px;padding:14px;overflow:auto}} section+section{{border-top:1px solid var(--line);margin-top:24px;padding-top:12px}}
 svg{{max-width:100%;height:auto}} footer{{color:var(--muted);margin-top:38px}}
 </style></head><body><main>
 <span class="valid">CONTROL CHECKS PASSED</span><h1>ScaleLab-RS</h1>
 <p class="lede">{experiment}: equal processed-token budgets do not necessarily imply equal corpus exposure. Runs are paired within each seed and share architecture, initial weights, tokenizer, and validation data.</p>
-<h2>Run comparison</h2><div class="card"><table><thead><tr><th>Run</th><th>Seeds</th><th>Parameters</th><th>Corpus tokens</th><th>Processed tokens</th><th>Tok/param</th><th>Effective epochs</th><th>Train NLL mean</th><th>Validation NLL mean ± SD</th><th>Gap mean</th></tr></thead><tbody>{rows}</tbody></table></div>
+<h2>Run comparison</h2><div class="card"><table><thead><tr><th>Run</th><th>Seeds</th><th>Parameters</th><th>Corpus tokens</th><th>Processed tokens</th><th>Tok/param</th><th>Effective epochs</th><th>Train NLL mean</th><th>Train PPL</th><th>Validation NLL mean ± SD</th><th>Validation PPL</th><th>Gap mean</th></tr></thead><tbody>{rows}</tbody></table></div>
 <h2>Headline comparison</h2><p class="lede">Mean generalization gap across paired seeds; vertical bars show the observed minimum-to-maximum range.</p><div class="card">{headline_svg}</div>
 <details><summary>Detailed per-seed charts</summary><h2>Training and validation NLL</h2><div class="card">{loss_svg}</div>
 <h2>Generalization gap</h2><p class="lede">The gap is validation NLL minus training NLL. A growing positive gap is evidence that training performance is improving faster than held-out performance.</p><div class="card">{gap_svg}</div></details>
 <h2>Final fixed-prompt samples</h2><div class="card">{sample_sections}</div>
 <h2>Interpretation discipline</h2><div class="card"><p>This experiment measures <strong>corpus reuse</strong>, not semantic diversity. Effective epochs are exposure equivalents because training samples random context windows. Results at this scale do not prove or disprove large-model scaling laws.</p></div>
-<footer>Generated locally by ScaleLab-RS. NLL is measured in nats per token.</footer>
+<footer>Generated locally by ScaleLab-RS. NLL is measured in nats per token; perplexity is exp(NLL).</footer>
 </main></body></html>"#
     )
 }
@@ -277,6 +281,10 @@ fn standard_deviation(values: &[f64]) -> f64 {
         .sum::<f64>()
         / (values.len() - 1) as f64;
     variance.sqrt()
+}
+
+fn perplexity(nll: f64) -> f64 {
+    nll.exp()
 }
 
 fn aggregate_gap_chart(runs: &[RunReport]) -> String {
@@ -511,4 +519,15 @@ fn escape(value: &str) -> String {
         .replace('<', "&lt;")
         .replace('>', "&gt;")
         .replace('"', "&quot;")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::perplexity;
+
+    #[test]
+    fn perplexity_is_the_exponential_of_nll() {
+        assert_eq!(perplexity(0.0), 1.0);
+        assert!((perplexity(10.0_f64.ln()) - 10.0).abs() < 1e-12);
+    }
 }

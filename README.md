@@ -11,10 +11,10 @@ fit its training data slightly better but generalized worse.
 
 ![Same processed tokens, different corpus exposure](docs/assets/headline-comparison.svg)
 
-| Condition | Processed tokens | Effective epochs | Validation NLL | Generalization gap |
-|---|---:|---:|---:|---:|
-| Broad corpus | 550,656 | 0.76 | **3.1952** | **0.0193** |
-| Repeated corpus | 550,656 | 21.87 | 3.2165 | 0.0468 |
+| Condition | Processed tokens | Effective epochs | Train NLL | Validation NLL | Validation PPL | Generalization gap |
+|---|---:|---:|---:|---:|---:|---:|
+| Broad corpus | 550,656 | 0.76 | 3.1758 | **3.1952** | **24.41** | **0.0193** |
+| Repeated corpus | 550,656 | 21.87 | **3.1698** | 3.2165 | 24.94 | 0.0468 |
 
 > **550K processed tokens do not mean 550K new information.**
 
