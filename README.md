@@ -1,5 +1,26 @@
 # ScaleLab-RS
 
+[![CI](https://github.com/kraftaa/ScaleLab-RS/actions/workflows/ci.yml/badge.svg)](https://github.com/kraftaa/ScaleLab-RS/actions/workflows/ci.yml)
+
+**Reproducible scaling experiments for tiny Transformers in Rust.**
+
+Two identical 27,520-parameter Transformers processed the same 550,656-token
+budget. One repeatedly replayed 25,184 characters; the other trained from a
+719,847-character corpus. Across three paired seeds, the repeated-data model
+fit its training data slightly better but generalized worse.
+
+![Same processed tokens, different corpus exposure](docs/assets/headline-comparison.svg)
+
+| Condition | Processed tokens | Effective epochs | Validation NLL | Generalization gap |
+|---|---:|---:|---:|---:|
+| Broad corpus | 550,656 | 0.76 | **3.1952** | **0.0193** |
+| Repeated corpus | 550,656 | 21.87 | 3.2165 | 0.0468 |
+
+> **550K processed tokens do not mean 550K new information.**
+
+Read the [complete result and limitations](docs/RESULTS.md), then reproduce it
+from the checked-in manifest rather than trusting the graph.
+
 An educational GPT-style language model written in Rust with
 [Candle](https://github.com/huggingface/candle). The goal is to make every
 important operation visible while letting Candle handle tensors, automatic

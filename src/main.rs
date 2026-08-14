@@ -1,10 +1,10 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
+use scalelab_rs::{config::ExperimentConfig, experiment, report, train};
 use std::path::PathBuf;
-use transformer_lab::{config::ExperimentConfig, experiment, report, train};
 
 #[derive(Parser)]
-#[command(name = "transformer-lab")]
+#[command(name = "scalelab")]
 #[command(about = "A readable, reproducible GPT learning lab built with Candle")]
 struct Cli {
     #[command(subcommand)]
@@ -67,7 +67,7 @@ fn main() -> Result<()> {
             validation_raw,
             output_dir,
             small_tokens,
-        } => transformer_lab::corpus::prepare_gutenberg(
+        } => scalelab_rs::corpus::prepare_gutenberg(
             &train_raw,
             &validation_raw,
             &output_dir,
@@ -78,10 +78,7 @@ fn main() -> Result<()> {
             prompt,
             tokens,
         } => {
-            println!(
-                "{}",
-                transformer_lab::sample::run(&run_dir, &prompt, tokens)?
-            );
+            println!("{}", scalelab_rs::sample::run(&run_dir, &prompt, tokens)?);
             Ok(())
         }
     }
