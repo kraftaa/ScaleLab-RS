@@ -4,7 +4,8 @@
 
 **Reproducible scaling experiments for tiny Transformers in Rust.**
 
-**[Explore the experiment in your browser →](https://kraftaa.github.io/ScaleLab-RS/)**  
+**[Explore the experiment in your browser →](https://kraftaa.github.io/ScaleLab-RS/)**
+
 No Rust installation required. Adjust the token budget, inspect the controlled
 comparison, and read the results and limitations.
 
