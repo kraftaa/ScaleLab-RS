@@ -1,0 +1,280 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ScaleLab-RS — Same tokens, different exposure</title>
+  <meta name="description" content="A controlled Rust and Candle experiment showing why equal processed-token budgets do not imply equal information exposure.">
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="550K tokens ≠ 550K new information">
+  <meta property="og:description" content="Two identical Transformers. The same token budget. Very different corpus exposure.">
+  <meta property="og:url" content="https://kraftaa.github.io/ScaleLab-RS/">
+  <meta property="og:image" content="https://kraftaa.github.io/ScaleLab-RS/assets/linkedin-result.png">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="550K tokens ≠ 550K new information">
+  <meta name="twitter:description" content="A reproducible Transformer corpus-reuse experiment in Rust and Candle.">
+  <meta name="twitter:image" content="https://kraftaa.github.io/ScaleLab-RS/assets/linkedin-result.png">
+  <link rel="stylesheet" href="site.css">
+  <script src="site.js" defer></script>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to experiment</a>
+
+  <header class="site-header">
+    <a class="brand" href="#top" aria-label="ScaleLab-RS home">
+      <span class="brand-mark">S</span>
+      <span>ScaleLab-RS</span>
+    </a>
+    <nav aria-label="Primary navigation">
+      <a href="#experiment">Experiment</a>
+      <a href="#explorer">Explorer</a>
+      <a href="#results">Results</a>
+      <a href="#meaning">Meaning</a>
+      <a class="nav-cta" href="https://github.com/kraftaa/ScaleLab-RS">View source <span aria-hidden="true">↗</span></a>
+    </nav>
+  </header>
+
+  <main id="main">
+    <section class="hero" id="top">
+      <div class="hero-copy">
+        <p class="eyebrow"><span class="pulse" aria-hidden="true">&#8203;</span> Controlled Transformer experiment</p>
+        <h1><span>550K processed tokens</span><br>do not mean 550K<br>new information.</h1>
+        <p class="hero-lede">Two identical 27,520-parameter Transformers received the same training-token budget. One replayed a tiny corpus. The other drew from a much broader corpus.</p>
+        <div class="hero-actions">
+          <a class="button primary" href="#results">See what happened</a>
+          <a class="button secondary" href="https://github.com/kraftaa/ScaleLab-RS">Reproduce on GitHub <span aria-hidden="true">↗</span></a>
+        </div>
+      </div>
+      <aside class="hero-facts" aria-label="Experiment facts">
+        <div class="fact"><strong>27,520</strong><span>trainable parameters</span></div>
+        <div class="fact"><strong>550,656</strong><span>tokens per matched run</span></div>
+        <div class="fact"><strong>3 × 3</strong><span>conditions × paired seeds</span></div>
+        <div class="fact"><strong>100%</strong><span>CPU, Rust, reproducible</span></div>
+      </aside>
+    </section>
+
+    <section class="chart-section" aria-labelledby="chart-title">
+      <div class="section-heading compact">
+        <p class="kicker">The result at a glance</p>
+        <h2 id="chart-title">Repetition fit the training data—but widened the gap.</h2>
+      </div>
+      <figure class="chart-card">
+        <img src="assets/linkedin-result.png" alt="Line chart showing the generalization gap growing to 0.0468 for the repeated corpus and 0.0193 for the broad corpus over 550,656 processed character tokens.">
+        <figcaption>Mean across seeds 11, 42, and 73. Vertical bars show the observed seed range.</figcaption>
+      </figure>
+    </section>
+
+    <section class="section" id="experiment">
+      <div class="section-heading">
+        <p class="kicker">One question, three conditions</p>
+        <h2>What does a token budget hide?</h2>
+        <p>All three runs use the same tiny GPT-style architecture. The comparison changes only the amount of training corpus available before sampling begins to repeat.</p>
+      </div>
+
+      <div class="condition-grid">
+        <article class="condition baseline">
+          <div class="condition-top"><span class="condition-letter">A</span><span class="tag">Reference</span></div>
+          <h3>Low exposure</h3>
+          <p class="condition-number">27,648</p>
+          <p class="condition-label">processed characters</p>
+          <dl>
+            <dt>Corpus</dt><dd>25,184 chars</dd>
+            <dt>Effective epochs</dt><dd>1.10</dd>
+            <dt>Tokens / parameter</dt><dd>1.00</dd>
+          </dl>
+        </article>
+
+        <article class="condition repeated">
+          <div class="condition-top"><span class="condition-letter">B</span><span class="tag">Matched budget</span></div>
+          <h3>Repeated exposure</h3>
+          <p class="condition-number">550,656</p>
+          <p class="condition-label">processed characters</p>
+          <dl>
+            <dt>Corpus</dt><dd>25,184 chars</dd>
+            <dt>Effective epochs</dt><dd>21.87</dd>
+            <dt>Tokens / parameter</dt><dd>20.01</dd>
+          </dl>
+        </article>
+
+        <article class="condition broad">
+          <div class="condition-top"><span class="condition-letter">C</span><span class="tag">Matched budget</span></div>
+          <h3>Broad exposure</h3>
+          <p class="condition-number">550,656</p>
+          <p class="condition-label">processed characters</p>
+          <dl>
+            <dt>Corpus</dt><dd>719,847 chars</dd>
+            <dt>Effective epochs</dt><dd>0.76</dd>
+            <dt>Tokens / parameter</dt><dd>20.01</dd>
+          </dl>
+        </article>
+      </div>
+
+      <div class="controls">
+        <div>
+          <p class="kicker">Held constant</p>
+          <h3>A comparison, not a coincidence.</h3>
+          <p>Within each seed, every condition starts from the exact same saved weights. ScaleLab checks the controls before training and refuses mismatched reports.</p>
+        </div>
+        <ul class="check-grid">
+          <li>Architecture and parameter count</li>
+          <li>Initial weights within each seed</li>
+          <li>Frozen character tokenizer</li>
+          <li>AdamW and constant learning rate</li>
+          <li>Batch size and context length</li>
+          <li>Fixed held-out evaluation batches</li>
+          <li>Processed-token budget for B and C</li>
+          <li>Seeds 11, 42, and 73</li>
+        </ul>
+      </div>
+    </section>
+
+    <section class="section explorer" id="explorer">
+      <div class="section-heading">
+        <p class="kicker">Interactive token budget</p>
+        <h2>Change the budget. See the exposure.</h2>
+        <p>This calculator recomputes training exposure for the fixed 27,520-parameter model. It does not invent new loss results—those require retraining.</p>
+      </div>
+
+      <div class="explorer-shell">
+        <div class="budget-control">
+          <div class="control-label">
+            <label for="token-budget">Processed tokens per parameter</label>
+            <output id="budget-output" for="token-budget">20×</output>
+          </div>
+          <input id="token-budget" type="range" min="1" max="40" step="1" value="20">
+          <div class="range-labels" aria-hidden="true"><span>1×</span><span>20× measured run</span><span>40×</span></div>
+        </div>
+
+        <div class="calculated-metrics" aria-live="polite">
+          <div><span>Target tokens</span><strong id="target-tokens">550,400</strong></div>
+          <div><span>Complete steps</span><strong id="optimizer-steps">717</strong></div>
+          <div><span>Actual tokens</span><strong id="actual-tokens">550,656</strong></div>
+        </div>
+
+        <div class="exposure-comparison">
+          <article class="exposure-row repeated-exposure">
+            <div><span>Repeated corpus</span><small>25,184 available characters</small></div>
+            <strong><span id="repeated-epochs">21.87</span> effective epochs</strong>
+            <div class="exposure-track" aria-hidden="true"><span id="repeated-bar"></span></div>
+          </article>
+          <article class="exposure-row broad-exposure">
+            <div><span>Broad corpus</span><small>719,847 available characters</small></div>
+            <strong><span id="broad-epochs">0.76</span> effective epochs</strong>
+            <div class="exposure-track" aria-hidden="true"><span id="broad-bar"></span></div>
+          </article>
+        </div>
+
+        <p class="explorer-note"><strong>Why actual exceeds target:</strong> every optimizer step consumes a complete batch of 8 × 96 = 768 character tokens, so ScaleLab rounds up to the next full step.</p>
+      </div>
+    </section>
+
+    <section class="section results" id="results">
+      <div class="section-heading light">
+        <p class="kicker">Measured, not guessed</p>
+        <h2>The broader corpus generalized better in every seed.</h2>
+        <p>The repeated model achieved a slightly better training fit, yet its held-out loss was worse. That is the central signal.</p>
+      </div>
+
+      <div class="result-cards">
+        <article><span>Broad validation NLL</span><strong>3.1952</strong><small>lower is better</small></article>
+        <article><span>Repeated validation NLL</span><strong>3.2165</strong><small>+0.0214 mean paired difference</small></article>
+        <article class="accent"><span>Gap multiplier</span><strong>2.4×</strong><small>repeated versus broad</small></article>
+      </div>
+
+      <div class="metric-guide" aria-label="How to read the metrics">
+        <div><strong>NLL</strong><p>Average prediction error in nats per character. Lower is better.</p></div>
+        <div><strong>Perplexity</strong><p>The model's effective uncertainty about the next character. Lower is better.</p></div>
+        <div><strong>Generalization gap</strong><p>Validation NLL minus training NLL. A larger gap is consistent with stronger overfitting.</p></div>
+      </div>
+
+      <div class="table-wrap">
+        <table>
+          <caption>Final means across three paired seeds</caption>
+          <thead><tr><th>Condition</th><th>Train NLL</th><th>Train PPL</th><th>Validation NLL</th><th>Validation PPL</th><th>Gap</th></tr></thead>
+          <tbody>
+            <tr><th>Broad corpus</th><td>3.1758</td><td>23.95</td><td class="best">3.1952</td><td class="best">24.41</td><td class="best">0.0193</td></tr>
+            <tr><th>Repeated corpus</th><td class="best">3.1698</td><td class="best">23.80</td><td>3.2165</td><td>24.94</td><td>0.0468</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="seed-strip" aria-label="Paired validation result by seed">
+        <div><span>Seed 11</span><strong>Broad lower by 0.0208</strong></div>
+        <div><span>Seed 42</span><strong>Broad lower by 0.0228</strong></div>
+        <div><span>Seed 73</span><strong>Broad lower by 0.0205</strong></div>
+      </div>
+    </section>
+
+    <section class="section meaning" id="meaning">
+      <div class="meaning-copy">
+        <p class="kicker">What it means</p>
+        <h2>Compute exposure is not information exposure.</h2>
+        <p>A tokens-per-parameter number tells us how much training computation occurred. It does not tell us whether those tokens were new, repeated, redundant, high quality, or informative.</p>
+        <blockquote>At this tiny character-model scale, replaying a small corpus to reach the same token budget produced a larger generalization gap than drawing that budget from more corpus positions.</blockquote>
+      </div>
+      <aside class="limits">
+        <p class="kicker">Interpretation discipline</p>
+        <h3>What this does not prove</h3>
+        <ul>
+          <li>It does not prove or disprove Chinchilla-style scaling laws.</li>
+          <li>Corpus size is not a formal measure of semantic diversity.</li>
+          <li>Character tokens are not directly comparable with BPE tokens.</li>
+          <li>Three seeds show repeatability here, not a universal law.</li>
+          <li>The gap is not an exact-continuation memorization score.</li>
+        </ul>
+      </aside>
+    </section>
+
+    <section class="section provenance">
+      <div>
+        <p class="kicker">Data provenance</p>
+        <h2>Separate books. Recorded hashes. No hidden split.</h2>
+      </div>
+      <div class="source-grid">
+        <article>
+          <span>Training source</span>
+          <h3><a href="https://www.gutenberg.org/ebooks/1342">Pride and Prejudice <span aria-hidden="true">↗</span></a></h3>
+          <p>Jane Austen · Project Gutenberg #1342</p>
+          <small>The 25,184-character repeated corpus is the exact prefix of the 719,847-character broad corpus.</small>
+        </article>
+        <article>
+          <span>Held-out source</span>
+          <h3><a href="https://www.gutenberg.org/ebooks/11">Alice's Adventures in Wonderland <span aria-hidden="true">↗</span></a></h3>
+          <p>Lewis Carroll · Project Gutenberg #11</p>
+          <small>Validation is encoded independently, so no context window can cross the training/validation boundary.</small>
+        </article>
+      </div>
+    </section>
+
+    <section class="section process" id="how">
+      <div class="section-heading">
+        <p class="kicker">How it was built</p>
+        <h2>From public-domain text to a reproducible report.</h2>
+      </div>
+      <ol class="steps">
+        <li><span>01</span><div><h3>Prepare</h3><p>Normalize two separate Gutenberg books and record every corpus hash.</p></div></li>
+        <li><span>02</span><div><h3>Preflight</h3><p>Instantiate the model, count parameters, freeze the tokenizer, and verify controls.</p></div></li>
+        <li><span>03</span><div><h3>Pair</h3><p>Create one deterministic SafeTensor per seed and reuse it across conditions.</p></div></li>
+        <li><span>04</span><div><h3>Train</h3><p>Run nine CPU jobs with Candle, AdamW, causal attention, and fixed evaluation.</p></div></li>
+        <li><span>05</span><div><h3>Report</h3><p>Validate hashes, aggregate seeds, and generate NLL, perplexity, gap, CSV, and SVG artifacts.</p></div></li>
+      </ol>
+    </section>
+
+    <section class="cta">
+      <p class="kicker">Do not trust the graph</p>
+      <h2>Inspect the code. Reproduce the experiment.</h2>
+      <p>ScaleLab-RS is an educational GPT implementation and controlled experiment harness written in Rust with Hugging Face Candle.</p>
+      <div class="hero-actions centered">
+        <a class="button primary" href="https://github.com/kraftaa/ScaleLab-RS">Open the repository <span aria-hidden="true">↗</span></a>
+        <a class="button secondary" href="RESULTS.md">Read detailed results</a>
+      </div>
+      <code>cargo run --release -- experiment experiments/mvp.toml</code>
+    </section>
+  </main>
+
+  <footer>
+    <div><strong>ScaleLab-RS</strong><span>Built by <a href="https://github.com/kraftaa">Maria</a> · Reproducible scaling experiments for tiny Transformers.</span></div>
+    <div><a href="https://github.com/kraftaa/ScaleLab-RS">GitHub</a><a href="ARCHITECTURE.md">Architecture</a><a href="MVP.md">Methodology</a></div>
+  </footer>
+</body>
+</html>
