@@ -4,6 +4,10 @@
 
 **Reproducible scaling experiments for tiny Transformers in Rust.**
 
+**[Explore the experiment in your browser →](https://kraftaa.github.io/ScaleLab-RS/)**  
+No Rust installation required. Adjust the token budget, inspect the controlled
+comparison, and read the results and limitations.
+
 Two identical 27,520-parameter Transformers processed the same 550,656-token
 budget. One repeatedly replayed 25,184 characters; the other trained from a
 719,847-character corpus. Across three paired seeds, the repeated-data model
