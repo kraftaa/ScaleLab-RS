@@ -793,10 +793,20 @@ fn should_skip_completed_run(
     if !summary_path.exists()
         || !run_dir.join("model.safetensors").exists()
         || !run_dir.join("metrics.jsonl").exists()
+        || !run_dir.join("samples.json").exists()
+        || !run_dir.join("dataset.json").exists()
     {
         return Ok(false);
     }
-    let summary: RunSummary = serde_json::from_slice(&fs::read(summary_path)?)?;
+    // A process can be interrupted while writing its final summary. Treat a
+    // partial or unreadable summary as an incomplete run so the next invocation
+    // retrains it instead of making the whole experiment permanently fail.
+    let Ok(summary_bytes) = fs::read(summary_path) else {
+        return Ok(false);
+    };
+    let Ok(summary) = serde_json::from_slice::<RunSummary>(&summary_bytes) else {
+        return Ok(false);
+    };
     Ok(summary.seed == seed
         && summary.run == checked_run.config.name
         && summary.parameter_count == checked.parameter_count
@@ -1042,6 +1052,8 @@ mod tests {
         fs::create_dir_all(&run_dir).unwrap();
         fs::write(run_dir.join("model.safetensors"), b"weights").unwrap();
         fs::write(run_dir.join("metrics.jsonl"), "{}\n").unwrap();
+        fs::write(run_dir.join("samples.json"), "[]").unwrap();
+        fs::write(run_dir.join("dataset.json"), "{}").unwrap();
         let summary = RunSummary {
             experiment: checked.spec.name.clone(),
             run: run.config.name.clone(),
@@ -1074,6 +1086,31 @@ mod tests {
         )
         .unwrap();
         assert!(should_skip_completed_run(&run_dir, &checked, run, 11, "init").unwrap());
+        fs::remove_file(run_dir.join("samples.json")).unwrap();
+        assert!(!should_skip_completed_run(&run_dir, &checked, run, 11, "init").unwrap());
         assert!(!should_skip_completed_run(&run_dir, &checked, run, 42, "init").unwrap());
+    }
+
+    #[test]
+    fn incomplete_or_corrupt_run_is_retrained() {
+        let directory = tempfile::tempdir().unwrap();
+        let spec = nested_spec(
+            directory.path(),
+            Some("heldout eval window text!!"),
+            "abcdefghijklmnop qrstuvwxyz more tokens here",
+        );
+        let checked = check(spec).unwrap();
+        let run = &checked.runs[0];
+        let run_dir = directory.path().join("incomplete");
+        fs::create_dir_all(&run_dir).unwrap();
+        fs::write(run_dir.join("model.safetensors"), b"weights").unwrap();
+        fs::write(run_dir.join("metrics.jsonl"), "{}\n").unwrap();
+        fs::write(run_dir.join("dataset.json"), "{}").unwrap();
+        fs::write(run_dir.join("summary.json"), b"{not complete").unwrap();
+
+        assert!(!should_skip_completed_run(&run_dir, &checked, run, 11, "init").unwrap());
+
+        fs::write(run_dir.join("samples.json"), "[]").unwrap();
+        assert!(!should_skip_completed_run(&run_dir, &checked, run, 11, "init").unwrap());
     }
 }

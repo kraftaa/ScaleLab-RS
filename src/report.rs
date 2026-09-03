@@ -298,6 +298,11 @@ fn html_report(
     let has_in_domain = runs
         .iter()
         .any(|run| run.summary.final_in_domain_validation_nll.is_some());
+    let headline_scope = if has_in_domain {
+        "in-domain generalization gap"
+    } else {
+        "generalization gap"
+    };
     let in_domain_header = if has_in_domain {
         "<th>In-domain NLL mean</th><th>In-domain gap mean</th>"
     } else {
@@ -443,7 +448,7 @@ svg{{max-width:100%;height:auto}} footer{{color:var(--muted);margin-top:38px}}
 <p class="lede">{experiment}: equal processed-token budgets do not necessarily imply equal corpus exposure. Runs are paired within each seed and share architecture, initial weights, tokenizer, and validation data.</p>
 <h2>Run comparison</h2><div class="card"><table><thead><tr><th>Run</th><th>Seeds</th><th>Parameters</th><th>Corpus tokens</th><th>Processed tokens</th><th>Tok/param</th><th>Effective epochs</th><th>Train NLL mean</th><th>Train PPL</th><th>Validation NLL mean ± SD</th><th>Validation PPL</th><th>Gap mean</th>{in_domain_header}</tr></thead><tbody>{rows}</tbody></table></div>
 {paired_section}
-<h2>Headline comparison</h2><p class="lede">Mean generalization gap across paired seeds; vertical bars show the observed minimum-to-maximum range. Official NLL uses fixed strided eval windows, not resampled batches.</p><div class="card">{headline_svg}</div>
+<h2>Headline comparison</h2><p class="lede">Mean {headline_scope} across paired seeds; vertical bars show the observed minimum-to-maximum range. Official NLL uses fixed strided eval windows, not resampled batches.</p><div class="card">{headline_svg}</div>
 <details><summary>Detailed per-seed charts</summary><h2>Training and validation NLL</h2><div class="card">{loss_svg}</div>
 <h2>Generalization gap</h2><p class="lede">The gap is validation NLL minus training NLL. A growing positive gap is evidence that training performance is improving faster than held-out performance.</p><div class="card">{gap_svg}</div></details>
 <h2>Final fixed-prompt samples</h2><div class="card">{sample_sections}</div>
@@ -496,8 +501,15 @@ fn aggregate_gap_chart(runs: &[RunReport]) -> String {
         .iter()
         .filter(|run| run.summary.actual_processed_tokens == matched_budget)
         .collect::<Vec<_>>();
+    let use_in_domain = headline_runs.iter().all(|run| {
+        !run.metrics.is_empty()
+            && run
+                .metrics
+                .iter()
+                .all(|metric| metric.in_domain_generalization_gap.is_some())
+    });
     let mut grouped = BTreeMap::<&str, Vec<&RunReport>>::new();
-    for run in headline_runs {
+    for run in &headline_runs {
         grouped.entry(&run.summary.run).or_default().push(run);
     }
     let mut series = Vec::<(String, Vec<(f64, f64, f64, f64)>)>::new();
@@ -512,7 +524,16 @@ fn aggregate_gap_chart(runs: &[RunReport]) -> String {
             let x = replications[0].metrics[index].processed_tokens as f64;
             let values = replications
                 .iter()
-                .map(|run| run.metrics[index].generalization_gap as f64)
+                .map(|run| {
+                    if use_in_domain {
+                        run.metrics[index]
+                            .in_domain_generalization_gap
+                            .expect("in-domain gaps were checked above")
+                            as f64
+                    } else {
+                        run.metrics[index].generalization_gap as f64
+                    }
+                })
                 .collect::<Vec<_>>();
             let average = mean(values.iter().copied());
             let minimum = values.iter().copied().fold(f64::INFINITY, f64::min);
@@ -550,7 +571,12 @@ fn aggregate_gap_chart(runs: &[RunReport]) -> String {
     let y_max = raw_max + padding;
     let sx = |x: f64| left + x / x_max * plot_w;
     let sy = |y: f64| top + (1.0 - (y - y_min) / (y_max - y_min)) * plot_h;
-    let mut svg = format!("<svg viewBox=\"0 0 {width} {height}\" role=\"img\" aria-label=\"Mean generalization gap across seeds\"><rect width=\"100%\" height=\"100%\" fill=\"white\"/><text x=\"{left}\" y=\"22\" fill=\"#172033\" font-size=\"16\" font-weight=\"700\">Same processed tokens, different corpus exposure</text>");
+    let gap_label = if use_in_domain {
+        "In-domain validation NLL − train NLL"
+    } else {
+        "Validation NLL − train NLL"
+    };
+    let mut svg = format!("<svg viewBox=\"0 0 {width} {height}\" role=\"img\" aria-label=\"Mean {gap_label} across seeds\"><rect width=\"100%\" height=\"100%\" fill=\"white\"/><text x=\"{left}\" y=\"22\" fill=\"#172033\" font-size=\"16\" font-weight=\"700\">Same processed tokens, different corpus exposure</text>");
     for tick in 0..=4 {
         let fraction = tick as f64 / 4.0;
         let y = top + fraction * plot_h;
@@ -578,7 +604,7 @@ fn aggregate_gap_chart(runs: &[RunReport]) -> String {
         }
         svg.push_str(&format!("<polyline points=\"{coordinates}\" fill=\"none\" stroke=\"{color}\" stroke-width=\"3\"/><line x1=\"{}\" y1=\"38\" x2=\"{}\" y2=\"38\" stroke=\"{color}\" stroke-width=\"3\"/><text x=\"{}\" y=\"42\" fill=\"#334155\" font-size=\"12\">{}</text>", left+index as f64*270.0, left+25.0+index as f64*270.0, left+32.0+index as f64*270.0, escape(name)));
     }
-    svg.push_str(&format!("<text x=\"{}\" y=\"{}\" text-anchor=\"middle\" fill=\"#334155\" font-size=\"13\">Processed tokens</text><text transform=\"translate(17 {}) rotate(-90)\" text-anchor=\"middle\" fill=\"#334155\" font-size=\"13\">Validation NLL − train NLL</text></svg>", left+plot_w/2.0, height-8.0, top+plot_h/2.0));
+    svg.push_str(&format!("<text x=\"{}\" y=\"{}\" text-anchor=\"middle\" fill=\"#334155\" font-size=\"13\">Processed tokens</text><text transform=\"translate(17 {}) rotate(-90)\" text-anchor=\"middle\" fill=\"#334155\" font-size=\"13\">{gap_label}</text></svg>", left+plot_w/2.0, height-8.0, top+plot_h/2.0));
     svg
 }
 

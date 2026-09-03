@@ -27,9 +27,8 @@ as `validation-in-domain.txt` and are not part of either training file.
 Out-of-domain validation still comes from *Alice's Adventures in Wonderland*
 and is never used to construct the tokenizer vocabulary.
 
-Rerunning `prepare-corpus` produces that in-domain holdout. The published
-[`RESULTS.md`](RESULTS.md) numbers used the earlier layout that trained on the
-full Pride and Prejudice text.
+The published [`RESULTS.md`](RESULTS.md) numbers use this held-out layout and
+fixed, strided evaluation windows.
 
 `prepare-corpus` pins the SHA-256 hashes of the Gutenberg downloads used for
 the published result. A reissued ebook fails the command unless you pass
