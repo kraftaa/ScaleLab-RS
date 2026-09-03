@@ -1,2 +1,2 @@
-the model learns from text. the model predicts the next token.
-the model learns from text. the model predicts the next token.
+abcdefghijklmnopqrstuvwxyz .,;:!?'-
+the model learns patterns from text and predicts what comes next.

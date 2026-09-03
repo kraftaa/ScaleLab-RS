@@ -37,3 +37,22 @@ jobs:
 
       - name: Verify controlled experiment fixture
         run: cargo run --locked -- check experiments/smoke-mvp.toml
+
+  smoke-experiment:
+    name: Smoke experiment and report
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Install stable Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo artifacts
+        uses: Swatinem/rust-cache@v2
+
+      - name: Run fixture experiment
+        run: cargo run --locked --release -- experiment experiments/smoke-mvp.toml
+
+      - name: Generate fixture report
+        run: cargo run --locked --release -- report runs/smoke-mvp-seeded

@@ -33,6 +33,9 @@ enum Command {
         output_dir: PathBuf,
         #[arg(long, default_value_t = 25_184)]
         small_tokens: usize,
+        /// Continue even if the downloaded Gutenberg files do not match the pinned SHA-256 hashes.
+        #[arg(long)]
+        allow_source_drift: bool,
     },
     /// Load a trained run and greedily generate text from a prompt.
     Sample {
@@ -67,11 +70,13 @@ fn main() -> Result<()> {
             validation_raw,
             output_dir,
             small_tokens,
+            allow_source_drift,
         } => scalelab_rs::corpus::prepare_gutenberg(
             &train_raw,
             &validation_raw,
             &output_dir,
             small_tokens,
+            allow_source_drift,
         ),
         Command::Sample {
             run_dir,

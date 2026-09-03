@@ -6,5 +6,3 @@ rust makes the experiment explicit, typed, portable, and inspectable.
 small controlled experiments can reveal mistakes that large runs would hide.
 data exposure and data reuse are related quantities, but they are not identical.
 the same compute budget can repeatedly revisit a short corpus or cover a broader one.
-loss curves show optimization; the train-validation gap helps reveal memorization.
-reproducible configurations make every comparison easier to inspect and challenge.

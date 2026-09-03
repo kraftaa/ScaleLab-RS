@@ -1,0 +1,2 @@
+loss curves show optimization; the train-validation gap helps reveal memorization.
+reproducible configurations make every comparison easier to inspect and challenge.

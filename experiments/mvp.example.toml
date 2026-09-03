@@ -1,9 +1,13 @@
 # Copy this file to experiments/mvp.toml after preparing document-separated
 # corpora under data/. Relative paths are resolved from this file's directory.
+#
+# Distinct training corpora must form a prefix chain unless you set
+# nested_training_corpora = false
 name = "corpus-reuse-20x"
 output_dir = "../runs/corpus-reuse-20x"
 tokenizer_corpus = "../data/train-broad.txt"
 validation_corpus = "../data/validation.txt"
+in_domain_validation_corpus = "../data/validation-in-domain.txt"
 prompts = ["the model", "once upon a time", "learning means"]
 
 [model]

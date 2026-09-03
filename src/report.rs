@@ -45,9 +45,14 @@ pub fn generate(experiment_dir: &Path) -> Result<()> {
     fs::write(report_dir.join("training-validation-nll.svg"), &loss_svg)?;
     fs::write(report_dir.join("generalization-gap.svg"), &gap_svg)?;
     fs::write(report_dir.join("comparison.csv"), comparison_csv(&runs))?;
+    let paired = paired_comparisons(&runs);
+    fs::write(
+        report_dir.join("paired-comparison.csv"),
+        paired_csv(&paired),
+    )?;
     fs::write(
         report_dir.join("index.html"),
-        html_report(&runs, &headline_svg, &loss_svg, &gap_svg),
+        html_report(&runs, &paired, &headline_svg, &loss_svg, &gap_svg),
     )?;
     println!(
         "Report written to {}",
@@ -89,6 +94,11 @@ fn validate_controls(runs: &[RunReport]) -> Result<()> {
         anyhow::ensure!(
             run.summary.validation_sha256 == first.validation_sha256,
             "run {} used a different validation corpus",
+            run.summary.run
+        );
+        anyhow::ensure!(
+            run.summary.in_domain_validation_sha256 == first.in_domain_validation_sha256,
+            "run {} used a different in-domain validation corpus",
             run.summary.run
         );
         anyhow::ensure!(
@@ -138,12 +148,12 @@ fn read_metrics(path: &Path) -> Result<Vec<ExperimentMetric>> {
 
 fn comparison_csv(runs: &[RunReport]) -> String {
     let mut csv = String::from(
-        "run,seed,parameters,train_corpus_tokens,processed_tokens,tokens_per_parameter,effective_epochs,best_validation_nll,final_train_nll,final_train_perplexity,final_validation_nll,final_validation_perplexity,generalization_gap,elapsed_seconds\n",
+        "run,seed,parameters,train_corpus_tokens,processed_tokens,tokens_per_parameter,effective_epochs,best_validation_nll,final_train_nll,final_train_perplexity,final_validation_nll,final_validation_perplexity,generalization_gap,final_in_domain_validation_nll,final_in_domain_generalization_gap,elapsed_seconds\n",
     );
     for run in runs {
         let s = &run.summary;
         csv.push_str(&format!(
-            "{},{},{},{},{},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.3}\n",
+            "{},{},{},{},{},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{},{},{:.3}\n",
             s.run,
             s.seed,
             s.parameter_count,
@@ -157,14 +167,142 @@ fn comparison_csv(runs: &[RunReport]) -> String {
             s.final_validation_nll,
             perplexity(s.final_validation_nll as f64),
             s.final_generalization_gap,
+            optional_f32(s.final_in_domain_validation_nll),
+            optional_f32(s.final_in_domain_generalization_gap),
             s.elapsed_seconds
         ));
     }
     csv
 }
 
-fn html_report(runs: &[RunReport], headline_svg: &str, loss_svg: &str, gap_svg: &str) -> String {
+fn optional_f32(value: Option<f32>) -> String {
+    value
+        .map(|number| format!("{number:.6}"))
+        .unwrap_or_default()
+}
+
+struct PairedComparison {
+    left_run: String,
+    right_run: String,
+    processed_tokens: usize,
+    seeds: usize,
+    mean_validation_nll_diff: f64,
+    min_diff: f64,
+    max_diff: f64,
+    right_higher_nll_count: usize,
+    mean_gap_diff: f64,
+    paired_t: Option<f64>,
+}
+
+fn paired_comparisons(runs: &[RunReport]) -> Vec<PairedComparison> {
+    let mut by_budget = BTreeMap::<usize, BTreeMap<&str, BTreeMap<u64, &RunReport>>>::new();
+    for run in runs {
+        by_budget
+            .entry(run.summary.actual_processed_tokens)
+            .or_default()
+            .entry(&run.summary.run)
+            .or_default()
+            .insert(run.summary.seed, run);
+    }
+    let mut paired = Vec::new();
+    for (processed_tokens, named) in by_budget {
+        let names = named.keys().copied().collect::<Vec<_>>();
+        if names.len() < 2 {
+            continue;
+        }
+        for (left_index, left_name) in names.iter().enumerate() {
+            for right_name in &names[left_index + 1..] {
+                let left_seeds = &named[left_name];
+                let right_seeds = &named[right_name];
+                let mut nll_diffs = Vec::new();
+                let mut gap_diffs = Vec::new();
+                for (seed, left) in left_seeds {
+                    let Some(right) = right_seeds.get(seed) else {
+                        continue;
+                    };
+                    nll_diffs.push(
+                        right.summary.final_validation_nll as f64
+                            - left.summary.final_validation_nll as f64,
+                    );
+                    gap_diffs.push(
+                        right.summary.final_generalization_gap as f64
+                            - left.summary.final_generalization_gap as f64,
+                    );
+                }
+                if nll_diffs.is_empty() {
+                    continue;
+                }
+                let mean_diff = mean(nll_diffs.iter().copied());
+                paired.push(PairedComparison {
+                    left_run: left_name.to_string(),
+                    right_run: right_name.to_string(),
+                    processed_tokens,
+                    seeds: nll_diffs.len(),
+                    mean_validation_nll_diff: mean_diff,
+                    min_diff: nll_diffs.iter().copied().fold(f64::INFINITY, f64::min),
+                    max_diff: nll_diffs.iter().copied().fold(f64::NEG_INFINITY, f64::max),
+                    right_higher_nll_count: nll_diffs.iter().filter(|diff| **diff > 0.0).count(),
+                    mean_gap_diff: mean(gap_diffs.iter().copied()),
+                    paired_t: paired_t(&nll_diffs),
+                });
+            }
+        }
+    }
+    paired
+}
+
+fn paired_t(diffs: &[f64]) -> Option<f64> {
+    if diffs.len() < 2 {
+        return None;
+    }
+    let average = mean(diffs.iter().copied());
+    let sd = standard_deviation(diffs);
+    if sd == 0.0 {
+        return None;
+    }
+    Some(average / (sd / (diffs.len() as f64).sqrt()))
+}
+
+fn paired_csv(pairs: &[PairedComparison]) -> String {
+    let mut csv = String::from(
+        "left_run,right_run,processed_tokens,seeds,mean_validation_nll_diff_right_minus_left,min_diff,max_diff,right_higher_nll_count,mean_gap_diff,paired_t\n",
+    );
+    for pair in pairs {
+        csv.push_str(&format!(
+            "{},{},{},{},{:.6},{:.6},{:.6},{},{:.6},{}\n",
+            pair.left_run,
+            pair.right_run,
+            pair.processed_tokens,
+            pair.seeds,
+            pair.mean_validation_nll_diff,
+            pair.min_diff,
+            pair.max_diff,
+            pair.right_higher_nll_count,
+            pair.mean_gap_diff,
+            pair.paired_t
+                .map(|value| format!("{value:.4}"))
+                .unwrap_or_default()
+        ));
+    }
+    csv
+}
+
+fn html_report(
+    runs: &[RunReport],
+    paired: &[PairedComparison],
+    headline_svg: &str,
+    loss_svg: &str,
+    gap_svg: &str,
+) -> String {
     let grouped = grouped_runs(runs);
+    let has_in_domain = runs
+        .iter()
+        .any(|run| run.summary.final_in_domain_validation_nll.is_some());
+    let in_domain_header = if has_in_domain {
+        "<th>In-domain NLL mean</th><th>In-domain gap mean</th>"
+    } else {
+        ""
+    };
     let rows = grouped
         .iter()
         .map(|(name, replications)| {
@@ -185,8 +323,37 @@ fn html_report(runs: &[RunReport], headline_svg: &str, loss_svg: &str, gap_svg: 
                     .iter()
                     .map(|run| run.summary.final_generalization_gap as f64),
             );
+            let in_domain_mean = replications
+                .iter()
+                .filter_map(|run| run.summary.final_in_domain_validation_nll.map(|nll| nll as f64))
+                .collect::<Vec<_>>();
+            let in_domain_gap_mean = replications
+                .iter()
+                .filter_map(|run| {
+                    run.summary
+                        .final_in_domain_generalization_gap
+                        .map(|gap| gap as f64)
+                })
+                .collect::<Vec<_>>();
+            let in_domain_cells = if has_in_domain {
+                format!(
+                    "<td>{}</td><td>{}</td>",
+                    if in_domain_mean.is_empty() {
+                        "—".to_string()
+                    } else {
+                        format!("{:.4}", mean(in_domain_mean.into_iter()))
+                    },
+                    if in_domain_gap_mean.is_empty() {
+                        "—".to_string()
+                    } else {
+                        format!("{:.4}", mean(in_domain_gap_mean.into_iter()))
+                    }
+                )
+            } else {
+                String::new()
+            };
             format!(
-                "<tr><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{:.2}</td><td>{:.2}</td><td>{:.4}</td><td>{:.2}</td><td>{:.4} ± {:.4}</td><td>{:.2}</td><td>{:.4}</td></tr>",
+                "<tr><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{:.2}</td><td>{:.2}</td><td>{:.4}</td><td>{:.2}</td><td>{:.4} ± {:.4}</td><td>{:.2}</td><td>{:.4}</td>{in_domain_cells}</tr>",
                 escape(name),
                 replications.len(),
                 s.parameter_count,
@@ -203,6 +370,34 @@ fn html_report(runs: &[RunReport], headline_svg: &str, loss_svg: &str, gap_svg: 
             )
         })
         .collect::<String>();
+    let paired_section = if paired.is_empty() {
+        String::new()
+    } else {
+        let paired_rows = paired
+            .iter()
+            .map(|pair| {
+                format!(
+                    "<tr><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{:.4}</td><td>{:.4}</td><td>{:.4}</td><td>{}/{}</td><td>{:.4}</td><td>{}</td></tr>",
+                    escape(&pair.left_run),
+                    escape(&pair.right_run),
+                    pair.processed_tokens,
+                    pair.seeds,
+                    pair.mean_validation_nll_diff,
+                    pair.min_diff,
+                    pair.max_diff,
+                    pair.right_higher_nll_count,
+                    pair.seeds,
+                    pair.mean_gap_diff,
+                    pair.paired_t
+                        .map(|value| format!("{value:.2}"))
+                        .unwrap_or_else(|| "—".to_string())
+                )
+            })
+            .collect::<String>();
+        format!(
+            r#"<h2>Paired comparison</h2><p class="lede">Validation NLL difference is right minus left, matched by seed. A positive mean means the right-hand run generalized worse. The paired t statistic uses the n-1 standard deviation; with a few seeds it is a diagnostic, not a scaling-law test.</p><div class="card"><table><thead><tr><th>Left</th><th>Right</th><th>Tokens</th><th>Seeds</th><th>Mean Δ NLL</th><th>Min Δ</th><th>Max Δ</th><th>Right worse</th><th>Mean Δ gap</th><th>Paired t</th></tr></thead><tbody>{paired_rows}</tbody></table></div>"#
+        )
+    };
     let experiment = escape(&runs[0].summary.experiment);
     let sample_sections = runs
         .iter()
@@ -246,8 +441,9 @@ svg{{max-width:100%;height:auto}} footer{{color:var(--muted);margin-top:38px}}
 </style></head><body><main>
 <span class="valid">CONTROL CHECKS PASSED</span><h1>ScaleLab-RS</h1>
 <p class="lede">{experiment}: equal processed-token budgets do not necessarily imply equal corpus exposure. Runs are paired within each seed and share architecture, initial weights, tokenizer, and validation data.</p>
-<h2>Run comparison</h2><div class="card"><table><thead><tr><th>Run</th><th>Seeds</th><th>Parameters</th><th>Corpus tokens</th><th>Processed tokens</th><th>Tok/param</th><th>Effective epochs</th><th>Train NLL mean</th><th>Train PPL</th><th>Validation NLL mean ± SD</th><th>Validation PPL</th><th>Gap mean</th></tr></thead><tbody>{rows}</tbody></table></div>
-<h2>Headline comparison</h2><p class="lede">Mean generalization gap across paired seeds; vertical bars show the observed minimum-to-maximum range.</p><div class="card">{headline_svg}</div>
+<h2>Run comparison</h2><div class="card"><table><thead><tr><th>Run</th><th>Seeds</th><th>Parameters</th><th>Corpus tokens</th><th>Processed tokens</th><th>Tok/param</th><th>Effective epochs</th><th>Train NLL mean</th><th>Train PPL</th><th>Validation NLL mean ± SD</th><th>Validation PPL</th><th>Gap mean</th>{in_domain_header}</tr></thead><tbody>{rows}</tbody></table></div>
+{paired_section}
+<h2>Headline comparison</h2><p class="lede">Mean generalization gap across paired seeds; vertical bars show the observed minimum-to-maximum range. Official NLL uses fixed strided eval windows, not resampled batches.</p><div class="card">{headline_svg}</div>
 <details><summary>Detailed per-seed charts</summary><h2>Training and validation NLL</h2><div class="card">{loss_svg}</div>
 <h2>Generalization gap</h2><p class="lede">The gap is validation NLL minus training NLL. A growing positive gap is evidence that training performance is improving faster than held-out performance.</p><div class="card">{gap_svg}</div></details>
 <h2>Final fixed-prompt samples</h2><div class="card">{sample_sections}</div>
@@ -523,11 +719,18 @@ fn escape(value: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::perplexity;
+    use super::{paired_t, perplexity};
 
     #[test]
     fn perplexity_is_the_exponential_of_nll() {
         assert_eq!(perplexity(0.0), 1.0);
         assert!((perplexity(10.0_f64.ln()) - 10.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn paired_t_is_mean_over_standard_error() {
+        assert!(paired_t(&[0.02, 0.02, 0.02]).is_none());
+        let statistic = paired_t(&[0.01, 0.02, 0.03]).unwrap();
+        assert!(statistic > 3.0);
     }
 }
