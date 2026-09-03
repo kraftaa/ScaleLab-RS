@@ -22,5 +22,14 @@ Prepare the data with:
 Normalization lowercases text, normalizes typographic quotes and dashes, and
 keeps ASCII letters, digits, selected punctuation, spaces, and paragraph
 breaks. `train-small.txt` is exactly the first 25,184 character tokens of
-`train-broad.txt`. Validation comes from a different book and is never used to
-construct the tokenizer vocabulary.
+`train-broad.txt`. The last six chapters of *Pride and Prejudice* are held out
+as `validation-in-domain.txt` and are not part of either training file.
+Out-of-domain validation still comes from *Alice's Adventures in Wonderland*
+and is never used to construct the tokenizer vocabulary.
+
+The published [`RESULTS.md`](RESULTS.md) numbers use this held-out layout and
+fixed, strided evaluation windows.
+
+`prepare-corpus` pins the SHA-256 hashes of the Gutenberg downloads used for
+the published result. A reissued ebook fails the command unless you pass
+`--allow-source-drift` after inspecting the new text.

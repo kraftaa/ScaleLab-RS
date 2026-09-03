@@ -1,6 +1,6 @@
 use crate::{
     config::{DataConfig, ExperimentConfig, ModelConfig, TrainingConfig},
-    data::{random_batch, CharTokenizer},
+    data::{batch_from_starts, random_batch, strided_starts, CharTokenizer},
     model::{initialize_variables, parameter_count, Gpt},
     sample::greedy_generate,
 };
@@ -23,10 +23,16 @@ pub struct ScaleExperiment {
     pub output_dir: PathBuf,
     pub tokenizer_corpus: PathBuf,
     pub validation_corpus: PathBuf,
+    #[serde(default)]
+    pub in_domain_validation_corpus: Option<PathBuf>,
     pub model: ModelConfig,
     pub training: ScaleTrainingConfig,
     #[serde(default)]
     pub prompts: Vec<String>,
+    /// When true, distinct training corpora must form a prefix chain: each
+    /// shorter corpus is an exact token prefix of each longer one.
+    #[serde(default = "default_nested_training_corpora")]
+    pub nested_training_corpora: bool,
     pub runs: Vec<ScaleRunConfig>,
 }
 
@@ -59,6 +65,8 @@ pub struct CheckedExperiment {
     pub tokenizer_sha256: String,
     pub validation_tokens: Vec<u32>,
     pub validation_sha256: String,
+    pub in_domain_validation_tokens: Option<Vec<u32>>,
+    pub in_domain_validation_sha256: Option<String>,
     pub parameter_count: usize,
     pub runs: Vec<CheckedRun>,
 }
@@ -81,10 +89,19 @@ pub struct DatasetArtifact {
     pub tokenizer_sha256: String,
     pub train_sha256: String,
     pub validation_sha256: String,
+    #[serde(default)]
+    pub in_domain_validation_sha256: Option<String>,
     pub train_corpus_tokens: usize,
     pub validation_corpus_tokens: usize,
+    #[serde(default)]
+    pub in_domain_validation_corpus_tokens: Option<usize>,
     pub tokenizer_vocab_size: usize,
     pub observed_train_token_types: usize,
+    pub train_eval_starts: Vec<usize>,
+    pub validation_eval_starts: Vec<usize>,
+    #[serde(default)]
+    pub in_domain_eval_starts: Option<Vec<usize>>,
+    pub eval_windows_sha256: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -99,6 +116,10 @@ pub struct ExperimentMetric {
     pub validation_nll: f32,
     pub generalization_gap: f32,
     pub validation_perplexity: f32,
+    #[serde(default)]
+    pub in_domain_validation_nll: Option<f32>,
+    #[serde(default)]
+    pub in_domain_generalization_gap: Option<f32>,
     pub elapsed_seconds: f64,
     pub tokens_per_second: f64,
 }
@@ -132,16 +153,26 @@ pub struct RunSummary {
     pub final_train_nll: f32,
     pub final_validation_nll: f32,
     pub final_generalization_gap: f32,
+    #[serde(default)]
+    pub final_in_domain_validation_nll: Option<f32>,
+    #[serde(default)]
+    pub final_in_domain_generalization_gap: Option<f32>,
     pub elapsed_seconds: f64,
     pub initial_weights_sha256: String,
     pub tokenizer_sha256: String,
     pub train_sha256: String,
     pub validation_sha256: String,
+    #[serde(default)]
+    pub in_domain_validation_sha256: Option<String>,
     pub control_sha256: String,
 }
 
 fn default_sample_tokens() -> usize {
     80
+}
+
+fn default_nested_training_corpora() -> bool {
+    true
 }
 
 impl ScaleExperiment {
@@ -155,6 +186,9 @@ impl ScaleExperiment {
         spec.output_dir = resolve(base, &spec.output_dir);
         spec.tokenizer_corpus = resolve(base, &spec.tokenizer_corpus);
         spec.validation_corpus = resolve(base, &spec.validation_corpus);
+        if let Some(path) = spec.in_domain_validation_corpus.as_mut() {
+            *path = resolve(base, path);
+        }
         for run in &mut spec.runs {
             run.train_corpus = resolve(base, &run.train_corpus);
         }
@@ -233,6 +267,26 @@ pub fn check(spec: ScaleExperiment) -> Result<CheckedExperiment> {
         "validation corpus is too short for the configured context"
     );
 
+    let (in_domain_validation_tokens, in_domain_validation_sha256, in_domain_text) =
+        if let Some(path) = &spec.in_domain_validation_corpus {
+            let text = read_text(path, "in-domain validation corpus")?;
+            let sha256 = sha256_file(path)?;
+            anyhow::ensure!(
+                sha256 != validation_sha256,
+                "in-domain validation corpus must differ from the out-of-domain validation corpus"
+            );
+            let tokens = tokenizer.encode(&text).context(
+                "in-domain validation corpus contains characters absent from the frozen tokenizer",
+            )?;
+            anyhow::ensure!(
+                tokens.len() > spec.model.context_length,
+                "in-domain validation corpus is too short for the configured context"
+            );
+            (Some(tokens), Some(sha256), Some(text))
+        } else {
+            (None, None, None)
+        };
+
     let device = Device::Cpu;
     let variables = VarMap::new();
     let vb = VarBuilder::from_varmap(&variables, DType::F32, &device);
@@ -260,6 +314,20 @@ pub fn check(spec: ScaleExperiment) -> Result<CheckedExperiment> {
             "run {} uses the validation corpus as training data",
             run.name
         );
+        if let Some(in_domain_sha256) = &in_domain_validation_sha256 {
+            anyhow::ensure!(
+                train_sha256 != *in_domain_sha256,
+                "run {} uses the in-domain validation corpus as training data",
+                run.name
+            );
+        }
+        if let Some(in_domain_text) = &in_domain_text {
+            anyhow::ensure!(
+                !train_text.contains(in_domain_text.trim_end()),
+                "run {} training corpus contains the in-domain validation text",
+                run.name
+            );
+        }
         let train_tokens = tokenizer.encode(&train_text).with_context(|| {
             format!(
                 "run {} contains characters absent from the frozen tokenizer",
@@ -288,6 +356,13 @@ pub fn check(spec: ScaleExperiment) -> Result<CheckedExperiment> {
         });
     }
 
+    if spec.nested_training_corpora {
+        ensure_nested_token_corpora(
+            runs.iter()
+                .map(|run| (run.config.name.as_str(), run.train_tokens.as_slice())),
+        )?;
+    }
+
     // Keep the source hash in the check result via this assertion and recompute it for artifacts.
     anyhow::ensure!(
         !tokenizer_corpus_sha256.is_empty(),
@@ -299,6 +374,8 @@ pub fn check(spec: ScaleExperiment) -> Result<CheckedExperiment> {
         tokenizer_sha256,
         validation_tokens,
         validation_sha256,
+        in_domain_validation_tokens,
+        in_domain_validation_sha256,
         parameter_count,
         runs,
     })
@@ -360,13 +437,53 @@ pub fn print_check(checked: &CheckedExperiment) {
     println!("  Optimizer configuration               ✓");
     println!("  Batch and context sizes               ✓");
     println!("  Validation corpus                     ✓");
+    if checked.in_domain_validation_tokens.is_some() {
+        println!("  In-domain validation corpus            ✓");
+    }
+    println!("  Strided eval windows                  ✓");
     println!("\nChanging variable");
     println!("  Training corpus available before reuse");
     println!("\nLeakage checks");
     println!("  Separate train/validation files       ✓");
     println!("  Distinct train/validation hashes      ✓");
+    if checked.in_domain_validation_sha256.is_some() {
+        println!("  In-domain val held out of training     ✓");
+    }
     println!("  No cross-boundary windows             ✓");
+    if checked.spec.nested_training_corpora {
+        println!("  Nested training corpora (prefix)      ✓");
+    } else {
+        println!("  Nested training corpora (prefix)      skipped");
+    }
     println!("\nExperiment validity: PASS");
+}
+
+fn ensure_nested_token_corpora<'a>(
+    named: impl IntoIterator<Item = (&'a str, &'a [u32])>,
+) -> Result<()> {
+    let mut unique: Vec<(&str, &[u32])> = Vec::new();
+    for (name, tokens) in named {
+        if unique.iter().any(|(_, existing)| *existing == tokens) {
+            continue;
+        }
+        unique.push((name, tokens));
+    }
+    unique.sort_by_key(|(_, tokens)| tokens.len());
+    for pair in unique.windows(2) {
+        let (short_name, short) = pair[0];
+        let (long_name, long) = pair[1];
+        anyhow::ensure!(
+            long.len() > short.len(),
+            "training corpora {short_name} and {long_name} have the same length but different contents; \
+             nested_training_corpora requires a prefix chain"
+        );
+        anyhow::ensure!(
+            long.starts_with(short),
+            "training corpus {short_name} is not a prefix of {long_name}; \
+             nested_training_corpora requires each smaller corpus to be an exact prefix of each larger one"
+        );
+    }
+    Ok(())
 }
 
 pub fn run(checked: CheckedExperiment) -> Result<()> {
@@ -388,11 +505,13 @@ pub fn run(checked: CheckedExperiment) -> Result<()> {
             .output_dir
             .join(format!("initial-deterministic-seed-{seed}.safetensors"));
         let device = Device::Cpu;
-        let variables = VarMap::new();
-        let vb = VarBuilder::from_varmap(&variables, DType::F32, &device);
-        let _model = Gpt::new(&checked.spec.model, checked.tokenizer.vocab_size(), vb)?;
-        initialize_variables(&variables, seed, &device)?;
-        variables.save(&initial_weights)?;
+        if !initial_weights.exists() {
+            let variables = VarMap::new();
+            let vb = VarBuilder::from_varmap(&variables, DType::F32, &device);
+            let _model = Gpt::new(&checked.spec.model, checked.tokenizer.vocab_size(), vb)?;
+            initialize_variables(&variables, seed, &device)?;
+            variables.save(&initial_weights)?;
+        }
         let initial_weights_sha256 = sha256_file(&initial_weights)?;
         println!("\nSeed {seed} initial weights: {initial_weights_sha256}");
         for checked_run in &checked.runs {
@@ -420,6 +539,13 @@ fn train_run(
         .output_dir
         .join(&checked_run.config.name)
         .join(format!("seed-{seed}"));
+    if should_skip_completed_run(&run_dir, checked, checked_run, seed, initial_weights_sha256)? {
+        println!(
+            "Skipping {} seed={seed}: completed run matches current controls",
+            checked_run.config.name
+        );
+        return Ok(());
+    }
     fs::create_dir_all(&run_dir)?;
     fs::write(
         run_dir.join("tokenizer.json"),
@@ -441,15 +567,36 @@ fn train_run(
     let started = Instant::now();
     let tokens_per_step = checked.spec.training.batch_size * checked.spec.model.context_length;
     let tokenizer_corpus_sha256 = sha256_file(&checked.spec.tokenizer_corpus)?;
+    let train_eval_starts = eval_starts_for(&checked_run.train_tokens, checked)?;
+    let validation_eval_starts = eval_starts_for(&checked.validation_tokens, checked)?;
+    let in_domain_eval_starts = checked
+        .in_domain_validation_tokens
+        .as_ref()
+        .map(|tokens| eval_starts_for(tokens, checked))
+        .transpose()?;
+    let eval_windows_sha256 = sha256_bytes(&serde_json::to_vec(&(
+        &train_eval_starts,
+        &validation_eval_starts,
+        &in_domain_eval_starts,
+    ))?);
     let dataset = DatasetArtifact {
         tokenizer_corpus_sha256,
         tokenizer_sha256: checked.tokenizer_sha256.clone(),
         train_sha256: checked_run.train_sha256.clone(),
         validation_sha256: checked.validation_sha256.clone(),
+        in_domain_validation_sha256: checked.in_domain_validation_sha256.clone(),
         train_corpus_tokens: checked_run.train_tokens.len(),
         validation_corpus_tokens: checked.validation_tokens.len(),
+        in_domain_validation_corpus_tokens: checked
+            .in_domain_validation_tokens
+            .as_ref()
+            .map(Vec::len),
         tokenizer_vocab_size: checked.tokenizer.vocab_size(),
         observed_train_token_types: checked_run.observed_token_types,
+        train_eval_starts,
+        validation_eval_starts,
+        in_domain_eval_starts,
+        eval_windows_sha256,
     };
     fs::write(
         run_dir.join("dataset.json"),
@@ -490,20 +637,14 @@ fn train_run(
     );
     for step in 0..=checked_run.steps {
         if step % checked.spec.training.eval_interval == 0 || step == checked_run.steps {
-            let train_nll = evaluate_fixed(
-                &model,
-                &checked_run.train_tokens,
-                checked,
-                seed ^ 0x0054_5241_494e,
-                &device,
-            )?;
-            let validation_nll = evaluate_fixed(
-                &model,
-                &checked.validation_tokens,
-                checked,
-                seed ^ 0x0056_414c_4944,
-                &device,
-            )?;
+            let train_nll = evaluate_strided(&model, &checked_run.train_tokens, checked, &device)?;
+            let validation_nll =
+                evaluate_strided(&model, &checked.validation_tokens, checked, &device)?;
+            let in_domain_validation_nll = checked
+                .in_domain_validation_tokens
+                .as_ref()
+                .map(|tokens| evaluate_strided(&model, tokens, checked, &device))
+                .transpose()?;
             let processed_tokens = step * tokens_per_step;
             let elapsed_seconds = started.elapsed().as_secs_f64();
             let metric = ExperimentMetric {
@@ -517,6 +658,8 @@ fn train_run(
                 validation_nll,
                 generalization_gap: validation_nll - train_nll,
                 validation_perplexity: validation_nll.exp(),
+                in_domain_validation_nll,
+                in_domain_generalization_gap: in_domain_validation_nll.map(|nll| nll - train_nll),
                 elapsed_seconds,
                 tokens_per_second: if elapsed_seconds > 0.0 {
                     processed_tokens as f64 / elapsed_seconds
@@ -524,10 +667,16 @@ fn train_run(
                     0.0
                 },
             };
-            println!(
-                "  step={step:>6} tok/param={:.2} train={train_nll:.4} valid={validation_nll:.4} gap={:.4}",
-                metric.tokens_per_parameter, metric.generalization_gap
-            );
+            match in_domain_validation_nll {
+                Some(in_domain) => println!(
+                    "  step={step:>6} tok/param={:.2} train={train_nll:.4} valid={validation_nll:.4} in-domain={in_domain:.4} gap={:.4}",
+                    metric.tokens_per_parameter, metric.generalization_gap
+                ),
+                None => println!(
+                    "  step={step:>6} tok/param={:.2} train={train_nll:.4} valid={validation_nll:.4} gap={:.4}",
+                    metric.tokens_per_parameter, metric.generalization_gap
+                ),
+            }
             metrics.push(metric);
             let generated = checked
                 .spec
@@ -593,11 +742,14 @@ fn train_run(
         final_train_nll: final_metric.train_nll,
         final_validation_nll: final_metric.validation_nll,
         final_generalization_gap: final_metric.generalization_gap,
+        final_in_domain_validation_nll: final_metric.in_domain_validation_nll,
+        final_in_domain_generalization_gap: final_metric.in_domain_generalization_gap,
         elapsed_seconds: final_metric.elapsed_seconds,
         initial_weights_sha256: initial_weights_sha256.to_string(),
         tokenizer_sha256: checked.tokenizer_sha256.clone(),
         train_sha256: checked_run.train_sha256.clone(),
         validation_sha256: checked.validation_sha256.clone(),
+        in_domain_validation_sha256: checked.in_domain_validation_sha256.clone(),
         control_sha256: control_sha256(checked)?,
     };
     fs::write(
@@ -616,6 +768,7 @@ fn control_sha256(checked: &CheckedExperiment) -> Result<String> {
         eval_batches: usize,
         learning_rate: f64,
         weight_decay: f64,
+        eval_protocol: &'static str,
     }
     let controls = Controls {
         model: &checked.spec.model,
@@ -624,30 +777,74 @@ fn control_sha256(checked: &CheckedExperiment) -> Result<String> {
         eval_batches: checked.spec.training.eval_batches,
         learning_rate: checked.spec.training.learning_rate,
         weight_decay: checked.spec.training.weight_decay,
+        eval_protocol: "strided-windows",
     };
     Ok(sha256_bytes(&serde_json::to_vec(&controls)?))
 }
 
-fn evaluate_fixed(
+fn should_skip_completed_run(
+    run_dir: &Path,
+    checked: &CheckedExperiment,
+    checked_run: &CheckedRun,
+    seed: u64,
+    initial_weights_sha256: &str,
+) -> Result<bool> {
+    let summary_path = run_dir.join("summary.json");
+    if !summary_path.exists()
+        || !run_dir.join("model.safetensors").exists()
+        || !run_dir.join("metrics.jsonl").exists()
+        || !run_dir.join("samples.json").exists()
+        || !run_dir.join("dataset.json").exists()
+    {
+        return Ok(false);
+    }
+    // A process can be interrupted while writing its final summary. Treat a
+    // partial or unreadable summary as an incomplete run so the next invocation
+    // retrains it instead of making the whole experiment permanently fail.
+    let Ok(summary_bytes) = fs::read(summary_path) else {
+        return Ok(false);
+    };
+    let Ok(summary) = serde_json::from_slice::<RunSummary>(&summary_bytes) else {
+        return Ok(false);
+    };
+    Ok(summary.seed == seed
+        && summary.run == checked_run.config.name
+        && summary.parameter_count == checked.parameter_count
+        && summary.actual_processed_tokens == checked_run.actual_processed_tokens
+        && summary.tokenizer_sha256 == checked.tokenizer_sha256
+        && summary.train_sha256 == checked_run.train_sha256
+        && summary.validation_sha256 == checked.validation_sha256
+        && summary.in_domain_validation_sha256 == checked.in_domain_validation_sha256
+        && summary.initial_weights_sha256 == initial_weights_sha256
+        && summary.control_sha256 == control_sha256(checked)?)
+}
+
+fn eval_starts_for(tokens: &[u32], checked: &CheckedExperiment) -> Result<Vec<usize>> {
+    let window_count = checked.spec.training.eval_batches * checked.spec.training.batch_size;
+    strided_starts(
+        tokens.len(),
+        checked.spec.model.context_length,
+        window_count,
+    )
+}
+
+fn evaluate_strided(
     model: &Gpt,
     tokens: &[u32],
     checked: &CheckedExperiment,
-    seed: u64,
     device: &Device,
 ) -> Result<f32> {
-    let mut rng = StdRng::seed_from_u64(seed);
+    let starts = eval_starts_for(tokens, checked)?;
     let mut sum = 0.0;
-    for _ in 0..checked.spec.training.eval_batches {
-        let (inputs, targets) = random_batch(
-            tokens,
-            checked.spec.training.batch_size,
-            checked.spec.model.context_length,
-            &mut rng,
-            device,
-        )?;
+    let mut batches = 0usize;
+    for chunk in starts.chunks(checked.spec.training.batch_size) {
+        let (inputs, targets) =
+            batch_from_starts(tokens, chunk, checked.spec.model.context_length, device)?;
         sum += model.loss(&inputs, &targets)?.to_scalar::<f32>()?;
+        batches += 1;
     }
-    Ok(sum / checked.spec.training.eval_batches as f32)
+    anyhow::ensure!(batches > 0, "eval produced no batches");
+    Ok(sum / batches as f32)
 }
 
 fn write_jsonl(path: PathBuf, metrics: &[ExperimentMetric]) -> Result<()> {
@@ -674,6 +871,9 @@ fn sha256_bytes(bytes: &[u8]) -> String {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+    use std::fs;
+
     #[test]
     fn exposure_math_rounds_up_to_complete_steps() {
         let parameters = 27_520usize;
@@ -683,5 +883,234 @@ mod tests {
         assert_eq!(target, 550_400);
         assert_eq!(steps, 8_600);
         assert_eq!(steps * tokens_per_step, target);
+    }
+
+    #[test]
+    fn nested_corpora_accept_prefix_chain_and_duplicates() {
+        let small = [1u32, 2, 3];
+        let broad = [1u32, 2, 3, 4, 5];
+        ensure_nested_token_corpora([
+            ("small-low", small.as_slice()),
+            ("reused", small.as_slice()),
+            ("broad", broad.as_slice()),
+        ])
+        .unwrap();
+    }
+
+    #[test]
+    fn nested_corpora_reject_non_prefix() {
+        let error = ensure_nested_token_corpora([
+            ("small", [1u32, 2].as_slice()),
+            ("broad", [9u32, 8, 7].as_slice()),
+        ])
+        .unwrap_err();
+        assert!(error.to_string().contains("not a prefix"));
+    }
+
+    #[test]
+    fn smoke_fixture_passes_nested_corpus_check() {
+        let spec = ScaleExperiment::load("experiments/smoke-mvp.toml").unwrap();
+        check(spec).unwrap();
+    }
+
+    #[test]
+    fn check_rejects_training_corpus_that_is_not_a_prefix() {
+        let directory = tempfile::tempdir().unwrap();
+        let tokenizer = directory.path().join("tokenizer.txt");
+        let validation = directory.path().join("validation.txt");
+        let small = directory.path().join("small.txt");
+        let broad = directory.path().join("broad.txt");
+        fs::write(&tokenizer, "abcdefghijklmnopqrstuvwxyz .").unwrap();
+        fs::write(&validation, "held out validation text xx").unwrap();
+        fs::write(&small, "aaaaaaaaaaaaaaaa").unwrap();
+        fs::write(&broad, "bbbbbbbbbbbbbbbbbbbbbbbb").unwrap();
+        let spec = ScaleExperiment {
+            name: "non-nested".into(),
+            output_dir: directory.path().join("runs"),
+            tokenizer_corpus: tokenizer,
+            validation_corpus: validation,
+            in_domain_validation_corpus: None,
+            model: ModelConfig {
+                context_length: 8,
+                d_model: 16,
+                n_heads: 4,
+                n_layers: 1,
+                d_ff: 32,
+                expected_parameters: None,
+            },
+            training: ScaleTrainingConfig {
+                batch_size: 2,
+                eval_interval: 10,
+                eval_batches: 1,
+                learning_rate: 0.001,
+                weight_decay: 0.01,
+                seed: None,
+                seeds: vec![11],
+                sample_tokens: 4,
+            },
+            prompts: Vec::new(),
+            nested_training_corpora: true,
+            runs: vec![
+                ScaleRunConfig {
+                    name: "small".into(),
+                    train_corpus: small,
+                    target_tokens_per_parameter: 0.5,
+                },
+                ScaleRunConfig {
+                    name: "broad".into(),
+                    train_corpus: broad,
+                    target_tokens_per_parameter: 0.5,
+                },
+            ],
+        };
+        let error = check(spec).unwrap_err();
+        assert!(error.to_string().contains("not a prefix"));
+    }
+
+    fn nested_spec(
+        directory: &std::path::Path,
+        in_domain: Option<&str>,
+        broad: &str,
+    ) -> ScaleExperiment {
+        let tokenizer = directory.join("tokenizer.txt");
+        let validation = directory.join("validation.txt");
+        let small = directory.join("small.txt");
+        let broad_path = directory.join("broad.txt");
+        fs::write(&tokenizer, "abcdefghijklmnopqrstuvwxyz .!").unwrap();
+        fs::write(&validation, "held out validation text xx").unwrap();
+        fs::write(&small, &broad[..16]).unwrap();
+        fs::write(&broad_path, broad).unwrap();
+        let in_domain_validation_corpus = in_domain.map(|text| {
+            let path = directory.join("in-domain.txt");
+            fs::write(&path, text).unwrap();
+            path
+        });
+        ScaleExperiment {
+            name: "nested".into(),
+            output_dir: directory.join("runs"),
+            tokenizer_corpus: tokenizer,
+            validation_corpus: validation,
+            in_domain_validation_corpus,
+            model: ModelConfig {
+                context_length: 8,
+                d_model: 16,
+                n_heads: 4,
+                n_layers: 1,
+                d_ff: 32,
+                expected_parameters: None,
+            },
+            training: ScaleTrainingConfig {
+                batch_size: 2,
+                eval_interval: 10,
+                eval_batches: 1,
+                learning_rate: 0.001,
+                weight_decay: 0.01,
+                seed: None,
+                seeds: vec![11],
+                sample_tokens: 4,
+            },
+            prompts: Vec::new(),
+            nested_training_corpora: true,
+            runs: vec![
+                ScaleRunConfig {
+                    name: "small".into(),
+                    train_corpus: small,
+                    target_tokens_per_parameter: 0.5,
+                },
+                ScaleRunConfig {
+                    name: "broad".into(),
+                    train_corpus: broad_path,
+                    target_tokens_per_parameter: 0.5,
+                },
+            ],
+        }
+    }
+
+    #[test]
+    fn check_rejects_in_domain_text_leaked_into_training() {
+        let directory = tempfile::tempdir().unwrap();
+        let spec = nested_spec(
+            directory.path(),
+            Some("extra heldout window!!"),
+            "abcdefghijklmnop extra heldout window!! more",
+        );
+        let error = check(spec).unwrap_err();
+        assert!(error.to_string().contains("in-domain validation"));
+    }
+
+    #[test]
+    fn matching_completed_run_is_skipped() {
+        let directory = tempfile::tempdir().unwrap();
+        let spec = nested_spec(
+            directory.path(),
+            Some("heldout eval window text!!"),
+            "abcdefghijklmnop qrstuvwxyz more tokens here",
+        );
+        let checked = check(spec).unwrap();
+        let run = &checked.runs[0];
+        let run_dir = directory.path().join("completed");
+        fs::create_dir_all(&run_dir).unwrap();
+        fs::write(run_dir.join("model.safetensors"), b"weights").unwrap();
+        fs::write(run_dir.join("metrics.jsonl"), "{}\n").unwrap();
+        fs::write(run_dir.join("samples.json"), "[]").unwrap();
+        fs::write(run_dir.join("dataset.json"), "{}").unwrap();
+        let summary = RunSummary {
+            experiment: checked.spec.name.clone(),
+            run: run.config.name.clone(),
+            seed: 11,
+            parameter_count: checked.parameter_count,
+            train_corpus_tokens: run.train_tokens.len(),
+            validation_corpus_tokens: checked.validation_tokens.len(),
+            target_processed_tokens: run.target_processed_tokens,
+            actual_processed_tokens: run.actual_processed_tokens,
+            tokens_per_parameter: 0.5,
+            effective_epochs: run.effective_epochs,
+            best_validation_nll: 1.0,
+            best_step: 0,
+            final_train_nll: 1.0,
+            final_validation_nll: 1.0,
+            final_generalization_gap: 0.0,
+            final_in_domain_validation_nll: None,
+            final_in_domain_generalization_gap: None,
+            elapsed_seconds: 0.0,
+            initial_weights_sha256: "init".into(),
+            tokenizer_sha256: checked.tokenizer_sha256.clone(),
+            train_sha256: run.train_sha256.clone(),
+            validation_sha256: checked.validation_sha256.clone(),
+            in_domain_validation_sha256: checked.in_domain_validation_sha256.clone(),
+            control_sha256: control_sha256(&checked).unwrap(),
+        };
+        fs::write(
+            run_dir.join("summary.json"),
+            serde_json::to_vec_pretty(&summary).unwrap(),
+        )
+        .unwrap();
+        assert!(should_skip_completed_run(&run_dir, &checked, run, 11, "init").unwrap());
+        fs::remove_file(run_dir.join("samples.json")).unwrap();
+        assert!(!should_skip_completed_run(&run_dir, &checked, run, 11, "init").unwrap());
+        assert!(!should_skip_completed_run(&run_dir, &checked, run, 42, "init").unwrap());
+    }
+
+    #[test]
+    fn incomplete_or_corrupt_run_is_retrained() {
+        let directory = tempfile::tempdir().unwrap();
+        let spec = nested_spec(
+            directory.path(),
+            Some("heldout eval window text!!"),
+            "abcdefghijklmnop qrstuvwxyz more tokens here",
+        );
+        let checked = check(spec).unwrap();
+        let run = &checked.runs[0];
+        let run_dir = directory.path().join("incomplete");
+        fs::create_dir_all(&run_dir).unwrap();
+        fs::write(run_dir.join("model.safetensors"), b"weights").unwrap();
+        fs::write(run_dir.join("metrics.jsonl"), "{}\n").unwrap();
+        fs::write(run_dir.join("dataset.json"), "{}").unwrap();
+        fs::write(run_dir.join("summary.json"), b"{not complete").unwrap();
+
+        assert!(!should_skip_completed_run(&run_dir, &checked, run, 11, "init").unwrap());
+
+        fs::write(run_dir.join("samples.json"), "[]").unwrap();
+        assert!(!should_skip_completed_run(&run_dir, &checked, run, 11, "init").unwrap());
     }
 }

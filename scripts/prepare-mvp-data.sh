@@ -1,6 +1,10 @@
 #!/bin/sh
 set -eu
 
+# Downloads the pinned Project Gutenberg sources and writes hashed corpora.
+# prepare-corpus rejects source files whose SHA-256 does not match the hashes
+# recorded for the published MVP result.
+
 project_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 raw_dir="$project_dir/data/raw"
 output_dir="$project_dir/data/mvp"

@@ -11,15 +11,16 @@ comparison, and read the results and limitations.
 
 Two identical 27,520-parameter Transformers processed the same 550,656-token
 budget. One repeatedly replayed 25,184 characters; the other trained from a
-719,847-character corpus. Across three paired seeds, the repeated-data model
-fit its training data slightly better but generalized worse.
+651,530-character corpus. The final six chapters of the same book were held
+out. Across three paired seeds, the repeated-data model fit its training data
+slightly better but generalized worse on both in-domain and out-of-domain text.
 
 ![Same processed tokens, different corpus exposure](docs/assets/headline-comparison.svg)
 
-| Condition | Processed tokens | Effective epochs | Train NLL | Validation NLL | Validation PPL | Generalization gap |
+| Condition | Processed tokens | Effective epochs | Train NLL | In-domain validation NLL | Validation PPL | Generalization gap |
 |---|---:|---:|---:|---:|---:|---:|
-| Broad corpus | 550,656 | 0.76 | 3.1758 | **3.1952** | **24.41** | **0.0193** |
-| Repeated corpus | 550,656 | 21.87 | **3.1698** | 3.2165 | 24.94 | 0.0468 |
+| Broad corpus | 550,656 | 0.85 | 3.1880 | **3.2038** | **24.63** | **0.0158** |
+| Repeated corpus | 550,656 | 21.87 | **3.1713** | 3.2298 | 25.27 | 0.0585 |
 
 > **550K processed tokens do not mean 550K new information.**
 

@@ -2,7 +2,7 @@
   const PARAMETERS = 27_520;
   const TOKENS_PER_STEP = 8 * 96;
   const REPEATED_CORPUS = 25_184;
-  const BROAD_CORPUS = 719_847;
+  const BROAD_CORPUS = 651_530;
   const MAX_BUDGET = 40;
 
   const budget = document.getElementById("token-budget");

@@ -5,6 +5,7 @@ edition = "2021"
 description = "Reproducible scaling experiments for tiny Transformers in Rust"
 repository = "https://github.com/kraftaa/ScaleLab-RS"
 readme = "README.md"
+license = "MIT"
 keywords = ["transformer", "candle", "machine-learning", "rust"]
 categories = ["science"]
 

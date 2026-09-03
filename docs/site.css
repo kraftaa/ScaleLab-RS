@@ -164,6 +164,9 @@ td.best { color: #84adff; font-weight: 800; }
 .seed-strip div:last-child { border-right: 0; }
 .seed-strip span { color: #8f9db5; font-size: 11px; text-transform: uppercase; }
 .seed-strip strong { margin-top: 4px; font-size: 14px; }
+.supporting-result { max-width: 820px; margin: 20px 0 0; color: #aebbd2; font-size: 14px; line-height: 1.65; }
+.supporting-result + .supporting-result { margin-top: 8px; }
+.supporting-result a { color: #9eb9ff; font-weight: 750; }
 
 .meaning { display: grid; grid-template-columns: 1.1fr .8fr; gap: 80px; align-items: start; }
 .meaning blockquote { margin: 34px 0 0; padding: 26px 28px; background: var(--blue-soft); border-left: 4px solid var(--blue); border-radius: 0 14px 14px 0; font-size: 20px; font-weight: 650; line-height: 1.5; }

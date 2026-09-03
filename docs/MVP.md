@@ -41,21 +41,30 @@ Every paired run uses the same:
 - Frozen tokenizer
 - Optimizer configuration
 - Batch size and context length
-- Validation corpus and fixed validation batches
+- Validation corpus and fixed strided validation windows
 - Processed-token target
 
-Only the training corpus available before reuse changes.
+Only the training corpus available before reuse changes. When
+`in_domain_validation_corpus` is set, that file is a second held-out eval set
+shared by every run. It must not appear inside any training file.
 
 The recommended manifest uses three seeds. Each seed gets an independently
 initialized model, then that exact initial SafeTensor is shared by all compared
-runs for the seed. The report shows the mean and observed range so one lucky
+runs for the seed. If a run directory already contains a matching
+`summary.json`, the trainer skips it so a crash can resume. The report shows
+the mean, observed range, and paired seed-level differences so one lucky
 initialization cannot carry the conclusion.
 
 Training and validation are separate files and are encoded independently, so a
 context window cannot cross their boundary. Exact file hashes are recorded and
 the checker rejects a training file whose hash equals the validation file hash.
-For a substantive experiment, prepare the files from distinct source documents;
-hash inequality alone cannot detect duplicated passages.
+When `nested_training_corpora` is true (the default), distinct training corpora
+must form a prefix chain: each shorter corpus is an exact token prefix of each
+longer one. That is the corpus-reuse control. Set
+`nested_training_corpora = false` only if the experiment is deliberately
+comparing unrelated collections. Hash inequality alone cannot detect duplicated
+passages between training and validation; prepare those files from distinct
+source documents.
 
 ## Commands
 
@@ -87,6 +96,7 @@ runs/<experiment>/
 │       └── tokenizer.json
 └── report/
     ├── comparison.csv
+    ├── paired-comparison.csv
     ├── generalization-gap.svg
     ├── headline-comparison.svg
     ├── index.html

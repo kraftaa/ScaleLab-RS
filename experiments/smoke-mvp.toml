@@ -2,6 +2,7 @@ name = "smoke-data-reuse"
 output_dir = "../runs/smoke-mvp-seeded"
 tokenizer_corpus = "../fixtures/scalelab/tokenizer-source.txt"
 validation_corpus = "../fixtures/scalelab/validation.txt"
+in_domain_validation_corpus = "../fixtures/scalelab/validation-in-domain.txt"
 prompts = ["the model", "attention"]
 
 [model]

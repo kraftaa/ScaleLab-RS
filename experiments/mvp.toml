@@ -2,6 +2,7 @@ name = "corpus-reuse-20x"
 output_dir = "../runs/mvp"
 tokenizer_corpus = "../data/mvp/tokenizer-source.txt"
 validation_corpus = "../data/mvp/validation.txt"
+in_domain_validation_corpus = "../data/mvp/validation-in-domain.txt"
 prompts = ["it is a truth", "alice was beginning", "the question was"]
 
 [model]

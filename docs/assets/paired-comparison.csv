@@ -1,0 +1,2 @@
+left_run,right_run,processed_tokens,seeds,mean_validation_nll_diff_right_minus_left,min_diff,max_diff,right_higher_nll_count,mean_gap_diff,paired_t
+broad-20x,repeated-20x,550656,3,0.023632,0.022961,0.024252,3,0.040326,63.2307
